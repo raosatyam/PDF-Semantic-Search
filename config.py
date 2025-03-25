@@ -34,3 +34,13 @@ def reset_directory(path):
 
 reset_directory(UPLOAD_FOLDER)
 reset_directory(INDEX_PATH)
+
+
+CACHE_EXPIRATION = 36000
+CACHE_ENABLED = True
+
+DATABASE_NAME = os.getenv("DATABASE_NAME")
+DB_USERNAME = os.getenv("DB_USERNAME")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")

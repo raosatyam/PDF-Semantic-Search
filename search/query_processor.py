@@ -7,10 +7,11 @@ from llm.llm_manager import LLMManager
 from llm.summarization import TextSummarizer
 from llm.rephrasing import TextRephraser
 from utils.helpers import truncate_text_for_llm, extract_snippets
+from utils.cache import ResponseCache
 
 
 class QueryProcessor:
-    def __init__(self, search_engine: SemanticSearch, llm_manager: LLMManager):
+    def __init__(self, search_engine: SemanticSearch, llm_manager: LLMManager, cache: ResponseCache):
         """
         Initialize the query processor.
         """
@@ -18,11 +19,17 @@ class QueryProcessor:
         self.llm_manager = llm_manager
         self.summarizer = TextSummarizer(llm_manager)
         self.rephraser = TextRephraser(llm_manager)
+        self.cache = cache
 
     def process_query(self, query: str, detail_level: str = "medium") -> Dict[str, Any]:
         """
         Process a query and return the result.
         """
+
+        cache_key = f"{query}_{detail_level}"
+        cached_result = self.cache.get_cached_response(cache_key)
+        if cached_result:
+            return json.loads(cached_result)
 
         search_results = self.search_engine.search(query)
         need_llm = self.search_engine.determine_llm_need(search_results)
@@ -50,6 +57,11 @@ class QueryProcessor:
                 content = self.summarizer.summarize(content, detail_level)
                 result["response_type"] = "summarized"
             else:
+                if content[0].islower():
+                    cutoff_index = next((i for i, char in enumerate(content) if char in ".?!"), None)
+                    if cutoff_index is not None and cutoff_index < len(content) // 4:
+                        content = content[cutoff_index+1:].strip()
+
                 result["response_type"] = "direct"
 
             result["response"] = content
@@ -64,7 +76,7 @@ class QueryProcessor:
 
             result["response"] = response
             result["response_type"] = "enhanced"
-
+        
         return result
 
     def _combine_relevant_passages(self, results: List[Dict[str, Any]], query: str) -> str:

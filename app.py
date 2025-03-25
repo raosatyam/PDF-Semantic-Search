@@ -1,4 +1,5 @@
 import traceback
+import threading
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 import os
 import json
@@ -11,7 +12,9 @@ from indexing.vector_store import VectorStore
 from search.semantic_search import SemanticSearch
 from llm.llm_manager import LLMManager
 from utils.helpers import allowed_file, save_uploaded_file
+from utils.cache import ResponseCache
 from search.query_processor import QueryProcessor
+from database.db_manager import DatabaseManager
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -23,8 +26,10 @@ document_parser = DocumentParser()
 embedding_generator = EmbeddingGenerator()
 vector_store = VectorStore()
 llm_manager = LLMManager()
+db_manager = DatabaseManager()
+cache = ResponseCache(db_manager)
 search_engine = SemanticSearch(embedding_generator, vector_store)
-query_processor = QueryProcessor(search_engine, llm_manager)
+query_processor = QueryProcessor(search_engine, llm_manager, cache)
 
 # In-memory document storage
 documents = {}
@@ -104,6 +109,9 @@ def upload_file():
             # Mark document as indexed
             documents[document_id]['indexed'] = True
 
+            # To clear all the cache present in the db
+            db_manager.clean_all_cache()
+
             return jsonify({
                 'success': True,
                 'message': f'File {file.filename} uploaded and indexed successfully',
@@ -121,18 +129,29 @@ def upload_file():
 def search():
     """Search for documents."""
     data = request.json
-    query = data.get('query', '')
+    query = data.get('query', '').strip()
+    
     detail_level = data.get('detail_level', 'medium')
 
     if not query:
         return jsonify({'error': 'Query is required'}), 400
 
     try:
+        result = cache.get_cached_response(query, data)
+        if result:
+            result["response_type"] = "Cache"
+            return jsonify(result)
+    except:
+        traceback.print_exc()
+        print("error in retriving from cache")
+        pass
+
+    try:
         # Process the query
         result = query_processor.process_query(query, detail_level)
-
+        cache_thread = threading.Thread(target=cache.cache_response, args=(query, result, data), daemon=True)
+        cache_thread.start()
         return jsonify(result)
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
